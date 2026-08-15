@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ironic-api-config
+  namespace: baremetal-operator-system
+data:
+  zz-auth.conf: |
+    [DEFAULT]
+    auth_strategy = http_basic
+    http_basic_auth_user_file = /auth/ironic/htpasswd

@@ -1,0 +1,13 @@
+spec:
+  template:
+    spec:
+      containers:
+        - name: manager
+          volumeMounts:
+            - name: ironic-credentials
+              mountPath: /opt/metal3/auth/ironic
+              readOnly: true
+      volumes:
+        - name: ironic-credentials
+          secret:
+            secretName: ironic-credentials
