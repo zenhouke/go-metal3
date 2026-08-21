@@ -133,6 +133,22 @@ func TestGenericAnnotationsCannotTriggerMetal3ControlOperations(t *testing.T) {
 	}
 }
 
+func TestGenericAnnotationsAllowNonControlMetal3Prefix(t *testing.T) {
+	t.Parallel()
+	kube := fake.NewClientBuilder().WithScheme(hostTestScheme(t)).Build()
+	host, err := New(kube, nil).Add(context.Background(), metal3sdk.HostCreateRequest{
+		Namespace: "metal3", Name: "worker-meta", BMCAddress: "ipmi://192.0.2.11",
+		BMCUsername: "admin", BMCPassword: []byte("secret"), BootMACAddress: "00:11:22:33:44:55",
+		Annotations: map[string]string{"baremetalhost.metal3.io/inventory-id": "rack-42"},
+	})
+	if err != nil {
+		t.Fatalf("non-control annotation rejected: %v", err)
+	}
+	if got := host.Annotations["baremetalhost.metal3.io/inventory-id"]; got != "rack-42" {
+		t.Fatalf("annotation = %q, want rack-42", got)
+	}
+}
+
 func TestAddRejectsBMOAdmissionConflictsBeforeCreatingSecret(t *testing.T) {
 	t.Parallel()
 	base := metal3sdk.HostCreateRequest{
@@ -267,6 +283,29 @@ func TestUpdateBMCSafelyDetachesAndReattaches(t *testing.T) {
 	}
 	if string(credentials.Data["username"]) != "new" {
 		t.Fatal("BMC credentials were not rotated")
+	}
+}
+
+func TestUpdateBMCRejectsMissingCredentialsBeforeDetach(t *testing.T) {
+	t.Parallel()
+	key := types.NamespacedName{Namespace: "metal3", Name: "worker-no-secret"}
+	host := &metal3v1alpha1.BareMetalHost{
+		ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name},
+		Spec:       metal3v1alpha1.BareMetalHostSpec{BMC: metal3v1alpha1.BMCDetails{Address: "ipmi://192.0.2.30"}},
+		Status:     metal3v1alpha1.BareMetalHostStatus{OperationalStatus: metal3v1alpha1.OperationalStatusOK, Provisioning: metal3v1alpha1.ProvisionStatus{State: metal3v1alpha1.StateProvisioned}},
+	}
+	base := fake.NewClientBuilder().WithScheme(hostTestScheme(t)).WithObjects(host).Build()
+	kube := &detachTransitionClient{Client: base}
+	_, err := New(kube, kube).UpdateBMC(context.Background(), key, metal3sdk.BMCUpdateRequest{Username: "new", Password: []byte("new")})
+	if !metal3sdk.IsCode(err, metal3sdk.CodeValidation) {
+		t.Fatalf("UpdateBMC() error = %v", err)
+	}
+	current := &metal3v1alpha1.BareMetalHost{}
+	if err := base.Get(context.Background(), key, current); err != nil {
+		t.Fatal(err)
+	}
+	if _, detached := current.Annotations[metal3v1alpha1.DetachedAnnotation]; detached {
+		t.Fatal("validation failure left host detached")
 	}
 }
 

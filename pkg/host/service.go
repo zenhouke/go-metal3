@@ -177,8 +177,9 @@ func (s *Service) Update(ctx context.Context, key types.NamespacedName, req meta
 
 // UpdateBMC follows the BMO detach-update-reattach workflow. If the host was
 // already detached by another actor, this method preserves that state.
-func (s *Service) UpdateBMC(ctx context.Context, key types.NamespacedName, req metal3sdk.BMCUpdateRequest) (*metal3sdk.Operation, error) {
-	op := operation.New("update-bmc", key)
+func (s *Service) UpdateBMC(ctx context.Context, key types.NamespacedName, req metal3sdk.BMCUpdateRequest) (op *metal3sdk.Operation, retErr error) {
+	const sdkDetachMarker = "go-metal3-sdk:update-bmc"
+	op = operation.New("update-bmc", key)
 	if req.Address == "" && req.Username == "" && len(req.Password) == 0 {
 		return op, metal3sdk.ValidationError("update-bmc", "address or credentials are required")
 	}
@@ -197,6 +198,25 @@ func (s *Service) UpdateBMC(ctx context.Context, key types.NamespacedName, req m
 	alreadyDetached := host.Status.OperationalStatus == metal3v1alpha1.OperationalStatusDetached
 	registering := host.Status.Provisioning.State == metal3v1alpha1.StateRegistering
 	detachedBySDK := false
+	if req.Username != "" && host.Spec.BMC.CredentialsName == "" {
+		return op, metal3sdk.ValidationError("update-bmc", "BareMetalHost has no BMC credentials Secret name")
+	}
+	// Any failure after the SDK has detached the host must not leave BMO
+	// unmanaged. This covers credential Secret failures, optimistic-lock
+	// conflicts, and context/timeouts during the update workflow.
+	defer func() {
+		if !detachedBySDK || retErr == nil {
+			return
+		}
+		_ = internalpatch.MutateWithRetry(ctx, s.kube, key,
+			func() *metal3v1alpha1.BareMetalHost { return &metal3v1alpha1.BareMetalHost{} },
+			func(current *metal3v1alpha1.BareMetalHost) error {
+				if current.Annotations[metal3v1alpha1.DetachedAnnotation] == sdkDetachMarker {
+					delete(current.Annotations, metal3v1alpha1.DetachedAnnotation)
+				}
+				return nil
+			})
+	}()
 	if !alreadyDetached && !registering {
 		if !detachableState(host.Status.Provisioning.State) {
 			return op, metal3sdk.InvalidStateError("update-bmc", key, "registering, detached, or a stable provisioning state", string(host.Status.Provisioning.State))
@@ -207,7 +227,7 @@ func (s *Service) UpdateBMC(ctx context.Context, key types.NamespacedName, req m
 				if current.Annotations == nil {
 					current.Annotations = map[string]string{}
 				}
-				current.Annotations[metal3v1alpha1.DetachedAnnotation] = "go-metal3-sdk:update-bmc"
+				current.Annotations[metal3v1alpha1.DetachedAnnotation] = sdkDetachMarker
 				return nil
 			}); err != nil {
 			return op, metal3sdk.KubernetesError("update-bmc", key, err)
@@ -222,9 +242,6 @@ func (s *Service) UpdateBMC(ctx context.Context, key types.NamespacedName, req m
 	}
 	if req.Username != "" {
 		secretName := host.Spec.BMC.CredentialsName
-		if secretName == "" {
-			return op, metal3sdk.ValidationError("update-bmc", "BareMetalHost has no BMC credentials Secret name")
-		}
 		if err := internalsecret.Upsert(ctx, s.kube, internalsecret.BMC(host.Namespace, secretName, req.Username, req.Password)); err != nil {
 			return op, metal3sdk.KubernetesError("update-bmc", key, err)
 		}
@@ -235,13 +252,14 @@ func (s *Service) UpdateBMC(ctx context.Context, key types.NamespacedName, req m
 			if req.Address != "" {
 				current.Spec.BMC.Address = req.Address
 			}
-			if detachedBySDK {
+			if detachedBySDK && current.Annotations[metal3v1alpha1.DetachedAnnotation] == sdkDetachMarker {
 				delete(current.Annotations, metal3v1alpha1.DetachedAnnotation)
 			}
 			return nil
 		}); err != nil {
 		return op, metal3sdk.KubernetesError("update-bmc", key, err)
 	}
+	detachedBySDK = false
 	if alreadyDetached {
 		operation.Succeed(op, "BMC update applied; host remains detached")
 		return op, nil

@@ -17,11 +17,12 @@
 - Minikube 中 BMO + Ironic 37 + Ingress 的可复现部署脚本；
 - 状态等待、结构化错误、冲突重试、最小权限 RBAC 和 fake-client 单元测试。
 
-实现状态和仍需具体部署提供的边界见 [`docs/STATUS.md`](docs/STATUS.md)，可选 HTTP 适配层及请求字段中文说明见 [`docs/HTTP_API.md`](docs/HTTP_API.md)，Minikube 部署见 [`docs/MINIKUBE.md`](docs/MINIKUBE.md)，设计依据见 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)。
+实现状态和仍需具体部署提供的边界见 [`docs/STATUS.md`](docs/STATUS.md)，可选 HTTP 适配层及请求字段中文说明见 [`docs/HTTP_API.md`](docs/HTTP_API.md)，Minikube 部署见 [`docs/MINIKUBE.md`](docs/MINIKUBE.md)。
+各 Go 服务接口的业务作用、状态约束和典型调用顺序见 [`docs/SDK_API.md`](docs/SDK_API.md)。
 
 ## 快速使用
 
-外部程序只需要一个能访问 Kubernetes API 的 kubeconfig，填写目标集群对应的 `server` 与 CA/认证信息；不需要把 `go-metal3-api`、Ingress 或公网域名部署到集群。
+外部程序可以使用 kubeconfig，也可以使用 Kubernetes ServiceAccount token 访问 API；在 Pod 内不传任何配置时，SDK 会自动读取 in-cluster 的 token 和 CA。外部使用 token 时，提供 API 地址、token 和（需要时）CA 文件即可。不需要把 `go-metal3-api`、Ingress 或公网域名部署到集群。
 
 ```go
 package main
@@ -29,6 +30,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	metal3sdk "github.com/zenhouke/go-metal3"
 	sdkclient "github.com/zenhouke/go-metal3/pkg/client"
 	"k8s.io/apimachinery/pkg/types"
@@ -59,6 +61,18 @@ func main() {
 	}
 }
 ```
+
+使用 ServiceAccount token（例如在集群外运行、但不想分发 kubeconfig）：
+
+```go
+cfg, err := sdkclient.LoadConfig(sdkclient.ConfigOptions{
+	APIServer:           "https://kubernetes.example:6443",
+	ServiceAccountToken: os.Getenv("KUBERNETES_TOKEN"),
+	CAFile:              "/secure/cluster-ca.crt",
+})
+```
+
+`ServiceAccountTokenFile` 可用于从文件读取 token（仍需同时提供 `APIServer`）；在 Pod 内若不传配置则直接使用自动发现的 in-cluster token。显式 `Kubeconfig` 优先级最高，其次是显式 token，最后才尝试 in-cluster 和本地 kubeconfig。
 
 安装镜像时，HTTP(S) 镜像默认要求非 MD5 checksum；OCI 镜像使用 `oci://` URL；`live-iso` 不接受 checksum、root device hints 或 config-drive 数据。`Wait=false` 表示只提交 BMH 期望状态，调用方可稍后查询 BMH 或使用等待 API。
 

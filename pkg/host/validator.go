@@ -94,11 +94,19 @@ func bootMACRequired(address string, inspectionDisabled bool) bool {
 
 func validateUserAnnotations(operation string, annotations map[string]string) error {
 	for key := range annotations {
-		if key == metal3v1alpha1.InspectAnnotationPrefix ||
+		// Only annotations interpreted by BMO as commands/state-transfer
+		// markers are reserved.  The baremetalhost.metal3.io prefix is not
+		// itself reserved: integrations commonly store ordinary metadata under
+		// that prefix, and the public API explicitly supports non-control
+		// annotations.
+		if key == metal3v1alpha1.PausedAnnotation ||
+			key == metal3v1alpha1.DetachedAnnotation ||
+			key == metal3v1alpha1.StatusAnnotation ||
+			key == metal3v1alpha1.HardwareDetailsAnnotation ||
+			key == metal3v1alpha1.InspectAnnotationPrefix ||
 			strings.HasPrefix(key, metal3v1alpha1.InspectAnnotationPrefix+"/") ||
 			key == metal3v1alpha1.RebootAnnotationPrefix ||
-			strings.HasPrefix(key, metal3v1alpha1.RebootAnnotationPrefix+"/") ||
-			strings.HasPrefix(key, "baremetalhost.metal3.io/") {
+			strings.HasPrefix(key, metal3v1alpha1.RebootAnnotationPrefix+"/") {
 			return metal3sdk.ValidationError(operation, fmt.Sprintf("Metal3 control annotation %q must be changed through its dedicated SDK operation", key))
 		}
 	}

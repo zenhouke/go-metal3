@@ -24,6 +24,7 @@ type SDK interface {
 
 // ClusterService discovers the Kubernetes and Metal3 APIs available to the SDK.
 type ClusterService interface {
+	// Info discovers the Kubernetes version and the BMO resource capabilities.
 	Info(context.Context) (*ClusterInfo, error)
 }
 
@@ -53,78 +54,130 @@ type ClusterInfo struct {
 
 // HostService manages BareMetalHost inventory and lifecycle records.
 type HostService interface {
+	// Add registers a BareMetalHost and stores its BMC credentials in a Secret.
 	Add(context.Context, HostCreateRequest) (*metal3v1alpha1.BareMetalHost, error)
+	// Import recreates a detached host and its known status during cluster pivot.
 	Import(context.Context, HostImportRequest) (*metal3v1alpha1.BareMetalHost, error)
+	// Get reads one BareMetalHost by namespace and name.
 	Get(context.Context, types.NamespacedName) (*metal3v1alpha1.BareMetalHost, error)
+	// List returns hosts, optionally restricted by namespace and labels.
 	List(context.Context, HostListOptions) ([]metal3v1alpha1.BareMetalHost, error)
+	// Update changes safe metadata and host description fields.
 	Update(context.Context, types.NamespacedName, HostPatch) (*metal3v1alpha1.BareMetalHost, error)
+	// UpdateBMC rotates BMC credentials and/or address with safe detach/reattach.
 	UpdateBMC(context.Context, types.NamespacedName, BMCUpdateRequest) (*Operation, error)
+	// AdoptExternallyProvisioned marks an already-installed host as externally managed.
 	AdoptExternallyProvisioned(context.Context, types.NamespacedName, WaitOptions) (*Operation, error)
+	// Detach stops BMO/Ironic management while retaining the Kubernetes object.
 	Detach(context.Context, types.NamespacedName, DetachOptions) (*Operation, error)
+	// Attach removes the detach marker and resumes BMO/Ironic management.
 	Attach(context.Context, types.NamespacedName, WaitOptions) (*Operation, error)
+	// Delete removes a host using explicit deprovision or inventory-only semantics.
 	Delete(context.Context, types.NamespacedName, DeleteOptions) (*Operation, error)
+	// WaitForPhase polls until the host reaches the requested stable SDK phase.
 	WaitForPhase(context.Context, types.NamespacedName, HostPhase) (*metal3v1alpha1.BareMetalHost, error)
+	// GetHardwareData returns the inspection resource owned by the host.
 	GetHardwareData(context.Context, types.NamespacedName) (*metal3v1alpha1.HardwareData, error)
 }
 
 // PowerService manages the desired and observed power state of a host.
 type PowerService interface {
+	// PowerOn asks BMO to converge the host to powered on.
 	PowerOn(context.Context, types.NamespacedName, WaitOptions) (*Operation, error)
+	// PowerOff asks BMO to converge the host to powered off.
 	PowerOff(context.Context, types.NamespacedName, WaitOptions) (*Operation, error)
+	// Reboot requests a one-shot soft, hard, or automatic reboot.
 	Reboot(context.Context, types.NamespacedName, RebootOptions) (*Operation, error)
+	// StartPhasedReboot powers off the host and holds it until completion.
 	StartPhasedReboot(context.Context, types.NamespacedName, PhasedRebootOptions) (*Operation, error)
+	// CompletePhasedReboot releases only the caller's phased-reboot hold.
 	CompletePhasedReboot(context.Context, types.NamespacedName, string, WaitOptions) (*Operation, error)
 }
 
 // ProvisioningService manages operating-system deployment workflows.
 type ProvisioningService interface {
+	// Install provisions an available host with an OS image and optional config data.
 	Install(context.Context, types.NamespacedName, InstallRequest) (*Operation, error)
+	// CustomDeploy invokes a site-specific deployment method from the ramdisk.
 	CustomDeploy(context.Context, types.NamespacedName, CustomDeployRequest) (*Operation, error)
+	// Reinstall deprovisions a provisioned host, then installs the requested image.
 	Reinstall(context.Context, types.NamespacedName, InstallRequest) (*Operation, error)
+	// Deprovision clears deployment intent and returns the host to inventory.
 	Deprovision(context.Context, types.NamespacedName, WaitOptions) (*Operation, error)
 }
 
 // MaintenanceService manages inspection and host preparation operations.
 type MaintenanceService interface {
+	// Inspect requests a fresh BMO hardware inspection.
 	Inspect(context.Context, types.NamespacedName, WaitOptions) (*Operation, error)
+	// SetExternalInspectionData submits hardware details collected by another system.
 	SetExternalInspectionData(context.Context, types.NamespacedName, *metal3v1alpha1.HardwareDetails, WaitOptions) (*Operation, error)
+	// SetInspectionMode enables or disables automatic inspection.
 	SetInspectionMode(context.Context, types.NamespacedName, InspectionMode) (*metal3v1alpha1.BareMetalHost, error)
+	// ConfigureRAID applies the desired hardware/software RAID layout.
 	ConfigureRAID(context.Context, types.NamespacedName, *metal3v1alpha1.RAIDConfig, WaitOptions) (*Operation, error)
+	// GetFirmwareSettings reads the host's BIOS settings resource.
 	GetFirmwareSettings(context.Context, types.NamespacedName) (*metal3v1alpha1.HostFirmwareSettings, error)
+	// GetFirmwareComponents reads BIOS, BMC, and NIC firmware status.
 	GetFirmwareComponents(context.Context, types.NamespacedName) (*metal3v1alpha1.HostFirmwareComponents, error)
+	// GetFirmwareSchema reads the per-host BIOS setting constraints.
 	GetFirmwareSchema(context.Context, types.NamespacedName) (*metal3v1alpha1.FirmwareSchema, error)
+	// GetPreprovisioningImage reads the host's generated deployment image metadata.
 	GetPreprovisioningImage(context.Context, types.NamespacedName) (*metal3v1alpha1.PreprovisioningImage, error)
+	// UpdateFirmwareSettings submits BIOS setting changes validated by BMO.
 	UpdateFirmwareSettings(context.Context, types.NamespacedName, metal3v1alpha1.DesiredSettingsMap, WaitOptions) (*Operation, error)
+	// UpdateFirmwareComponents submits BIOS, BMC, or NIC firmware image updates.
 	UpdateFirmwareComponents(context.Context, types.NamespacedName, []metal3v1alpha1.FirmwareUpdate, WaitOptions) (*Operation, error)
+	// SetPreprovisioningNetworkData stores or clears the ramdisk network Secret.
 	SetPreprovisioningNetworkData(context.Context, types.NamespacedName, []byte) (*metal3v1alpha1.BareMetalHost, error)
 }
 
 // ResourceService exposes the remaining first-class BMO v0.13 resources that
 // are not tied to one imperative host lifecycle operation.
 type ResourceService interface {
+	// CreateBMCEventSubscription registers a Redfish event webhook for a host.
 	CreateBMCEventSubscription(context.Context, BMCEventSubscriptionCreateRequest) (*metal3v1alpha1.BMCEventSubscription, error)
+	// GetBMCEventSubscription reads one event subscription.
 	GetBMCEventSubscription(context.Context, types.NamespacedName) (*metal3v1alpha1.BMCEventSubscription, error)
+	// ListBMCEventSubscriptions lists event subscriptions by namespace/labels.
 	ListBMCEventSubscriptions(context.Context, ResourceListOptions) ([]metal3v1alpha1.BMCEventSubscription, error)
+	// DeleteBMCEventSubscription removes an event subscription.
 	DeleteBMCEventSubscription(context.Context, types.NamespacedName) error
 
+	// ApplyDataImage creates or updates an auxiliary data image attachment.
 	ApplyDataImage(context.Context, DataImageApplyRequest) (*metal3v1alpha1.DataImage, error)
+	// GetDataImage reads one data image.
 	GetDataImage(context.Context, types.NamespacedName) (*metal3v1alpha1.DataImage, error)
+	// ListDataImages lists data images by namespace/labels.
 	ListDataImages(context.Context, ResourceListOptions) ([]metal3v1alpha1.DataImage, error)
+	// DeleteDataImage removes a data image.
 	DeleteDataImage(context.Context, types.NamespacedName) error
 
+	// CreateHostClaim creates a claim that lets BMO select and reserve a host.
 	CreateHostClaim(context.Context, HostClaimCreateRequest) (*metal3v1alpha1.HostClaim, error)
+	// GetHostClaim reads one host claim.
 	GetHostClaim(context.Context, types.NamespacedName) (*metal3v1alpha1.HostClaim, error)
+	// ListHostClaims lists host claims by namespace/labels.
 	ListHostClaims(context.Context, ResourceListOptions) ([]metal3v1alpha1.HostClaim, error)
+	// DeleteHostClaim releases a host claim.
 	DeleteHostClaim(context.Context, types.NamespacedName) error
 
+	// ApplyHostDeployPolicy creates or updates cross-namespace claim permissions.
 	ApplyHostDeployPolicy(context.Context, HostDeployPolicyApplyRequest) (*metal3v1alpha1.HostDeployPolicy, error)
+	// GetHostDeployPolicy reads one claim policy.
 	GetHostDeployPolicy(context.Context, types.NamespacedName) (*metal3v1alpha1.HostDeployPolicy, error)
+	// ListHostDeployPolicies lists claim policies by namespace/labels.
 	ListHostDeployPolicies(context.Context, ResourceListOptions) ([]metal3v1alpha1.HostDeployPolicy, error)
+	// DeleteHostDeployPolicy removes a claim policy.
 	DeleteHostDeployPolicy(context.Context, types.NamespacedName) error
 
+	// ApplyHostUpdatePolicy creates or updates live firmware-update policy.
 	ApplyHostUpdatePolicy(context.Context, HostUpdatePolicyApplyRequest) (*metal3v1alpha1.HostUpdatePolicy, error)
+	// GetHostUpdatePolicy reads one live-update policy.
 	GetHostUpdatePolicy(context.Context, types.NamespacedName) (*metal3v1alpha1.HostUpdatePolicy, error)
+	// ListHostUpdatePolicies lists live-update policies by namespace/labels.
 	ListHostUpdatePolicies(context.Context, ResourceListOptions) ([]metal3v1alpha1.HostUpdatePolicy, error)
+	// DeleteHostUpdatePolicy removes a live-update policy.
 	DeleteHostUpdatePolicy(context.Context, types.NamespacedName) error
 }
 

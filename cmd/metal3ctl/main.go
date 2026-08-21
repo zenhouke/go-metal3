@@ -15,10 +15,18 @@ import (
 
 func main() {
 	var kubeconfig string
+	var apiServer string
+	var serviceAccountToken string
+	var serviceAccountTokenFile string
+	var caFile string
 	var namespace string
 	var name string
 	var action string
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "path to kubeconfig; defaults to in-cluster or standard kubeconfig")
+	flag.StringVar(&apiServer, "server", "", "Kubernetes API server URL when using a service account token")
+	flag.StringVar(&serviceAccountToken, "token", "", "Kubernetes service account bearer token")
+	flag.StringVar(&serviceAccountTokenFile, "token-file", "", "path to a Kubernetes service account bearer token")
+	flag.StringVar(&caFile, "ca-file", "", "cluster CA file when using -token or -token-file")
 	flag.StringVar(&namespace, "namespace", "metal3", "BareMetalHost namespace")
 	flag.StringVar(&name, "name", "", "BareMetalHost name")
 	flag.StringVar(&action, "action", "get", "read-only action: info, list, or get")
@@ -28,7 +36,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-name is required")
 		os.Exit(2)
 	}
-	config, err := sdkclient.LoadConfig(sdkclient.ConfigOptions{Kubeconfig: kubeconfig})
+	config, err := sdkclient.LoadConfig(sdkclient.ConfigOptions{
+		Kubeconfig: kubeconfig, APIServer: apiServer,
+		ServiceAccountToken: serviceAccountToken, ServiceAccountTokenFile: serviceAccountTokenFile,
+		CAFile: caFile,
+	})
 	if err != nil {
 		fatal(err)
 	}
